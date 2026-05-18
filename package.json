@@ -1,0 +1,25 @@
+{
+  "name": "sample-nel-solution",
+  "version": "1.0.0",
+  "description": "Serverless W3C Network Error Logging (NEL) pipeline on AWS CDK",
+  "bin": {
+    "nel-project": "bin/nel-project.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc -w",
+    "test": "node --test test/*.test.js",
+    "cdk": "cdk"
+  },
+  "devDependencies": {
+    "@types/node": "^25.8.0",
+    "aws-cdk": "^2.1122.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^6.0.3"
+  },
+  "dependencies": {
+    "aws-cdk-lib": "^2.254.0",
+    "cdk-nag": "^2.38.2",
+    "constructs": "^10.6.0"
+  }
+}

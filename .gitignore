@@ -1,0 +1,27 @@
+*.js
+!lambda/**/*.js
+*.d.ts
+node_modules
+
+# CDK
+.cdk.staging
+cdk.out
+
+# OS / IDE
+.DS_Store
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# Environment
+.env
+.env.*
+
+# Security scan results (generated, not committed)
+
+# Internal working files (not for publication)
+.kiro/
+research/
+*.pptx

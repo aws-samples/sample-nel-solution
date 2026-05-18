@@ -1,0 +1,9 @@
+{
+  "name": "nel-transform-lambda",
+  "version": "1.0.0",
+  "description": "Lambda function to transform NEL reports for Firehose",
+  "main": "index.js",
+  "dependencies": {
+    "@aws-sdk/client-cloudwatch": "^3.1048.0"
+  }
+}
