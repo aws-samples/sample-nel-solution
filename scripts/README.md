@@ -55,3 +55,7 @@ Continuously generate random NEL reports for load testing.
 ```
 
 Press Ctrl+C to stop and view statistics.
+
+## Conclusion
+
+These utility scripts provide end-to-end lifecycle management for the NEL Reporting Pipeline. Use deploy.sh for deployment, test-nel-errors.sh to validate the endpoint, test-athena-queries.sh to verify analytics, and cleanup.sh for teardown. For continuous load testing, use generate-nel-data.sh.

@@ -88,7 +88,7 @@ The `body` object contains the network error details. Fields vary by error phase
 | Field | Type | Description |
 |-------|------|-------------|
 | `sampling_fraction` | number | 0.0-1.0, the sampling rate that selected this report |
-| `elapsed_time` | integer | Milliseconds from request start to completion/abort |
+| `elapsed_time` | integer | Milliseconds from request start to completion or cancellation |
 | `phase` | string | `"dns"`, `"connection"`, or `"application"` |
 | `type` | string | Error type (see section 6) or `"ok"` for success |
 

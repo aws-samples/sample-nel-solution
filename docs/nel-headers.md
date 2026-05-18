@@ -2,6 +2,17 @@
 
 NEL (Network Error Logging) headers instruct browsers to report network failures back to your collection endpoint. When a browser encounters a DNS, TCP, TLS, or HTTP error on your domain, it sends a structured report to the URL specified in these headers. This guide shows how to configure NEL headers on Amazon CloudFront or your origin server.
 
+## Prerequisites
+
+Before configuring NEL headers, you need:
+
+- NEL Reporting Pipeline deployed (`cdk deploy` — see main [README](../README.md))
+- The `APIEndpoint` output value from your deployment
+- AWS CLI installed and configured with appropriate permissions
+- An existing Amazon CloudFront distribution or web server to configure
+
+## Configuration
+
 Add these response headers to your web application (or CloudFront Response Headers Policy):
 
 ```
@@ -69,10 +80,11 @@ aws cloudfront update-distribution \
    Look for the `Report-To` and `NEL` headers in the response.
 
 2. Open your site in Chrome or Firefox
-3. Open Developer Tools, and then choose the Network tab
-4. Refresh the page
-5. Select any request
-6. In Response Headers, verify that `Report-To` and `NEL` are present
+3. Open Developer Tools
+4. Choose the Network tab
+5. Refresh the page
+6. Select any request
+7. In Response Headers, verify that `Report-To` and `NEL` are present
 
 ## Sampling Configuration
 

@@ -126,7 +126,7 @@ npm test                                                        # unit tests
 - Rate limiting: 2000 req/min/IP + AWS IP Reputation + Core Rule Set + Known Bad Inputs
 - Content-Type enforcement: only `application/reports+json` accepted
 - S3: BlockPublicAccess, enforceSSL, SSE-S3 encryption
-- IAM: least-privilege, namespace-scoped permissions
+- AWS Identity and Access Management (IAM): least-privilege, namespace-scoped permissions
 - No authentication by design -- browsers send NEL reports anonymously per W3C spec
 
 ## Cleanup
