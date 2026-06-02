@@ -85,21 +85,6 @@ GROUP BY body.type ORDER BY cnt DESC;
 
 See [`docs/athena-queries.md`](docs/athena-queries.md) for more query patterns.
 
-## Cost Estimate
-
-Conservative estimate (1M requests/month):
-
-| Component | 1M requests | 10M requests |
-|-----------|-------------|--------------|
-| AWS WAF | $15.60 | $21.00 |
-| API Gateway | $3.50 | $35.00 |
-| Firehose | $0.22 | $2.24 |
-| CloudWatch | $1.50 | $1.50 |
-| Lambda + S3 | <$0.01 | <$0.01 |
-| **Total** | **~$21** | **~$60** |
-
-Athena queries: ~$0.00005 each with partition filters.
-
 ## Project Structure
 
 ```
