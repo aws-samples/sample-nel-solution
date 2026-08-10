@@ -25,3 +25,6 @@ cdk.out
 .kiro/
 research/
 *.pptx
+
+# CDK deploy outputs (contains deployed endpoint/ARN values)
+cdk-outputs.json
