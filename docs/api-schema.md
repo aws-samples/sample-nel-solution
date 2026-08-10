@@ -13,7 +13,7 @@ NEL is a two-part system:
 1. **Policy delivery**: Server sends `NEL` + `Report-To` response headers to opt-in
 2. **Report delivery**: Browser POSTs error reports to the configured endpoint
 
-The reporting endpoint (this pipeline) only handles part 2 -- receiving reports.
+The reporting endpoint (this pipeline) only handles part 2, receiving reports.
 
 ---
 
@@ -39,15 +39,15 @@ The reporting endpoint (this pipeline) only handles part 2 -- receiving reports.
 
 The W3C spec mandates `application/reports+json`.
 
-No custom headers. No auth tokens. Browsers send NEL reports autonomously -- there is no mechanism to attach authorization headers.
+No custom headers. No auth tokens. Browsers send NEL reports autonomously. There is no mechanism to attach authorization headers.
 
 ### Expected Response
 
 | Status | Meaning |
 |--------|---------|
 | 2xx | Report accepted |
-| 410 Gone | Endpoint removed -- browser stops sending to this endpoint |
-| Other | Delivery failure -- browser may retry |
+| 410 Gone | Endpoint removed. Browser stops sending to this endpoint |
+| Other | Delivery failure. Browser may retry |
 
 The response body is ignored by the browser.
 
@@ -269,8 +269,8 @@ NEL: {
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
-| `report_to` | string | Yes* | -- | Endpoint group name from `Report-To` |
-| `max_age` | integer | Yes | -- | Seconds the NEL policy is valid. `0` removes policy |
+| `report_to` | string | Yes* | n/a | Endpoint group name from `Report-To` |
+| `max_age` | integer | Yes | n/a | Seconds the NEL policy is valid. `0` removes policy |
 | `include_subdomains` | boolean | No | `false` | Apply to all subdomains |
 | `success_fraction` | number | No | `0.0` | Sampling rate for successful requests (0.0-1.0) |
 | `failure_fraction` | number | No | `1.0` | Sampling rate for failed requests (0.0-1.0) |
@@ -300,16 +300,16 @@ API Gateway model validates:
 
 | Rule | Priority | Check | Label |
 |------|----------|-------|-------|
-| RateLimitPerIP | 10 | 2000 req/min/IP | -- (block) |
-| AWSIPReputation | 20 | Known bad IPs | -- (block) |
-| AWSKnownBadInputs | 30 | Log4j, traversal | -- (block) |
-| AWSCoreRuleSet | 40 | OWASP top 10 | -- (block) |
+| RateLimitPerIP | 10 | 2000 req/min/IP | None (block) |
+| AWSIPReputation | 20 | Known bad IPs | None (block) |
+| AWSKnownBadInputs | 30 | Log4j, traversal | None (block) |
+| AWSCoreRuleSet | 40 | OWASP top 10 | None (block) |
 | ValidatePath | 100 | URI == `/prod/` | `nel:valid-path` |
 | ValidateMethod | 110 | POST or OPTIONS | `nel:valid-method` |
 | ValidateBody | 120 | Body contains `"type":`, `"url":`, `"body":`, `"phase":`, `"elapsed_time":`, `"sampling_fraction":` | `nel:valid-body` |
 | AllowCORSPreflight | 9998 | valid-path + valid-method + OPTIONS | allow |
 | AllowValidRequests | 9999 | All 3 labels present | allow |
-| Default | -- | Everything else | block |
+| Default | n/a | Everything else | block |
 
 ### CORS
 

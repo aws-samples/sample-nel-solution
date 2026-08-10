@@ -90,8 +90,8 @@ aws cloudfront update-distribution \
 
 The `success_fraction` and `failure_fraction` parameters control what percentage of reports browsers send:
 
-- **`failure_fraction`** -- proportion of failed requests reported (0.0 to 1.0). Higher values give better visibility into errors but increase report volume.
-- **`success_fraction`** -- proportion of successful requests reported (0.0 to 1.0). Successful reports help establish baselines but generate high volume on busy sites.
+- `failure_fraction` sets the proportion of failed requests reported (0.0 to 1.0). Higher values give more visibility into errors and increase report volume.
+- `success_fraction` sets the proportion of successful requests reported (0.0 to 1.0). Successful reports help establish baselines and generate high volume on busy sites.
 
 A lower `success_fraction` reduces ingestion costs and noise while still capturing error data. A higher `failure_fraction` increases the likelihood of capturing errors when they occur. Adjust both to match your traffic volume and observability requirements.
 

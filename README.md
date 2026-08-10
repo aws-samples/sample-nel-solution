@@ -1,13 +1,13 @@
 # NEL Reporting Pipeline
 
-**Collect browser-reported network errors on AWS.** DNS resolution failures, TCP connection resets, and TLS handshake timeouts occur before requests reach your servers. The [W3C Network Error Logging](https://w3c.github.io/network-error-logging/) (NEL) specification enables supporting browsers to report these errors back to an endpoint you control. This project gives you a complete serverless pipeline to collect, store, and analyze those reports on AWS -- deployed in minutes with a single `cdk deploy`.
+DNS resolution failures, TCP connection resets, and TLS handshake timeouts happen before a request reaches your servers, so your server-side logs never record them. The [W3C Network Error Logging](https://w3c.github.io/network-error-logging/) (NEL) specification lets supporting browsers report these errors to an endpoint you control. This project deploys a serverless pipeline on AWS that collects, stores, and analyzes those reports with a single `cdk deploy`.
 
-## Why NEL?
+## What NEL gives you
 
-- **Catch failures your servers never see** -- DNS resolution errors, connection timeouts, and TLS failures happen before a request reaches your infrastructure
-- **Real user data, not synthetic** -- every report comes from an actual browser session experiencing a real network path
-- **Zero client-side code** -- browsers send reports automatically via HTTP headers, no JavaScript SDK needed
-- **Measure error rates** by type, phase, URL, and server IP across real user sessions
+- Visibility into failures your servers never see. DNS, connection, and TLS errors occur before a request reaches your infrastructure.
+- Real user data. Every report comes from an actual browser session on a real network path, not synthetic monitoring.
+- No client-side code. Browsers send reports automatically through HTTP headers, with no JavaScript SDK.
+- Error rates broken down by type, phase, URL, and server IP across real user sessions.
 
 > **Important:** This is sample code for demonstration and educational purposes only. It is not intended for production use without additional security review and testing. You should work with your security and legal teams to meet your organizational requirements before deployment. Deploying this solution may incur AWS charges.
 
@@ -58,9 +58,9 @@ cdk deploy
 The stack deploys to your configured AWS region (`CDK_DEFAULT_REGION` or AWS CLI profile).
 
 Outputs after deploy:
-- `APIEndpoint` -- your NEL reporting URL
-- `BucketName` -- S3 bucket for reports
-- `AlarmTopicArn` -- subscribe for alerts
+- `APIEndpoint`: your NEL reporting URL
+- `BucketName`: S3 bucket for reports
+- `AlarmTopicArn`: subscribe for alerts
 
 Verify the deployment succeeded by confirming all three outputs are displayed. If the deployment fails, check the AWS CloudFormation console for error details.
 
@@ -89,7 +89,7 @@ See [`docs/athena-queries.md`](docs/athena-queries.md) for more query patterns.
 
 ```
 bin/nel-project.ts           CDK app entry point (cdk-nag enabled)
-lib/nel-project-stack.ts     CDK stack -- all infrastructure
+lib/nel-project-stack.ts     CDK stack, all infrastructure
 lambda/index.js              Firehose transform: decode, validate, enrich
 test/nel-project.test.ts     Unit tests (node:test, zero dependencies)
 scripts/                     Deploy, cleanup, test, and load generation scripts
@@ -112,24 +112,27 @@ npm test                                                        # unit tests
 - Content-Type enforcement: only `application/reports+json` accepted
 - S3: BlockPublicAccess, enforceSSL, SSE-S3 encryption
 - AWS Identity and Access Management (IAM): least-privilege, namespace-scoped permissions
-- No authentication by design -- browsers send NEL reports anonymously per W3C spec
+- No authentication by design. Browsers send NEL reports anonymously per the W3C specification
 
 ## Cleanup
 
-> **Warning:** Cleanup operations permanently delete all collected NEL report data. This action cannot be undone. Export any reports you need to retain before running cleanup scripts.
-
 ```bash
-./scripts/cleanup.sh       # full teardown (stack + S3 + Data Catalog + logs)
-cdk destroy                # stack only (S3 bucket retained by default)
+./scripts/cleanup.sh                    # remove the stack, Data Catalog, and log groups (S3 bucket retained)
+./scripts/cleanup.sh --delete-bucket    # also delete the S3 bucket and all report data (asks for typed confirmation)
+cdk destroy                             # remove the stack only
 ```
+
+The cleanup script resolves the AWS Region from `--region`, `AWS_REGION`, `AWS_DEFAULT_REGION`, or your AWS CLI configuration, and stops if the stack is not found in that Region. The S3 reports bucket has a RETAIN policy, so it is kept by default.
+
+> **Warning:** `--delete-bucket` permanently deletes all collected NEL report data and cannot be undone. Export any reports you need to keep before you use it.
 
 ## Documentation
 
-- [Configuration](docs/configuration.md) -- feature toggles and options
-- [NEL Headers](docs/nel-headers.md) -- how to enable NEL on your site
-- [Athena Queries](docs/athena-queries.md) -- query cookbook
-- [Monitoring](docs/monitoring.md) -- alarms, dashboard, Contributor Insights
-- [API Schema](docs/api-schema.md) -- W3C NEL spec, WAF rules, API Gateway config
+- [Configuration](docs/configuration.md): feature toggles and options
+- [NEL Headers](docs/nel-headers.md): how to enable NEL on your site
+- [Athena Queries](docs/athena-queries.md): query cookbook
+- [Monitoring](docs/monitoring.md): alarms, dashboard, Contributor Insights
+- [API Schema](docs/api-schema.md): W3C NEL spec, WAF rules, API Gateway config
 
 ## Conclusion
 
