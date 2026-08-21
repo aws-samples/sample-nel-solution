@@ -1,35 +1,51 @@
-# NEL Pipeline Monitoring and Alarms
+# Monitoring
 
-The NEL Reporting Pipeline provides two monitoring modes. Always-on alarms and a dashboard track pipeline health using Amazon CloudWatch metrics with no additional cost. Optional monitoring adds AWS Lambda structured logging and Contributor Insights rules for deeper error analysis.
+The NEL Reporting Pipeline always deploys operational metrics, alarms, and a dashboard. Detailed Lambda and AWS WAF request logs are separate opt-in features because they add cost and can collect sensitive request metadata.
 
-## Always-on Alarms
+## Always-on telemetry
 
 | Alarm | Condition |
-|-------|-----------|
-| NEL-API-High-Error-Rate | 5xx > 5% for 5 min |
-| NEL-Lambda-High-Failure-Rate | Errors > 10% for 5 min |
-| NEL-Firehose-High-Failure-Rate | Delivery failures > 5% for 10 min |
-| NEL-Data-Freshness-Delay | Delay > 15 min |
-| NEL-WAF-Blocked-Spike | Blocked > 1000 in 5 min |
+|---|---|
+| `NEL-API-High-Error-Rate` | API Gateway 5xx responses exceed 5% for 5 minutes |
+| `NEL-Lambda-High-Failure-Rate` | Lambda errors exceed 10% for 5 minutes |
+| `NEL-Firehose-High-Failure-Rate` | Delivery failures exceed 5% for 10 minutes |
+| `NEL-Data-Freshness-Delay` | Delivery delay exceeds 15 minutes |
+| `NEL-WAF-Blocked-Spike` | Blocked requests exceed 1,000 in 5 minutes |
 
-## Always-on Dashboard
+The `NEL-Pipeline` dashboard includes:
 
-The `NEL-Pipeline` dashboard includes pipeline health widgets using Amazon CloudWatch Metrics (no Amazon CloudWatch Logs dependency):
-- Error types over time (from custom CloudWatch metrics)
-- Amazon API Gateway + AWS WAF ingestion rates
-- Amazon Data Firehose delivery success + data freshness
+- Bounded custom NEL error metrics. W3C predefined error types retain their names; extension types are aggregated as `other`.
+- API Gateway request counts and AWS WAF allowed/blocked counts.
+- Firehose delivery records, success, and data freshness.
 
-## Optional Monitoring (`enableMonitoring: true`)
+These resources are not free by definition. CloudWatch custom metrics, alarms, dashboards, API calls, and SNS delivery can incur charges. Review the current [Amazon CloudWatch pricing](https://aws.amazon.com/cloudwatch/pricing/) and [Amazon SNS pricing](https://aws.amazon.com/sns/pricing/) for the deployment Region.
 
-When enabled:
-- AWS Lambda structured logging to Amazon CloudWatch Logs
-- 11 Contributor Insights rules (DNS/TCP/TLS/HTTP errors, failing domains/IPs/URLs)
-- Additional CI + LogQuery widgets on the dashboard
+## Optional Lambda monitoring
 
-## Subscribe to Alerts
+Set `enableMonitoring=true` in `cdk.json` or pass `-c enableMonitoring=true` to add:
 
-Use the `AlarmTopicArn` output from `cdk deploy` to subscribe via email, Slack, or PagerDuty.
+- Lambda CloudWatch Logs permissions and structured report logs.
+- 11 Contributor Insights rules for DNS, TCP, TLS, HTTP, phase, URL, and server analysis.
+- Contributor Insights and Logs Insights widgets on the dashboard.
 
-## Conclusion
+Structured logs can include full URLs, referrers, user agents, server IP addresses, methods, status codes, and timings. Query strings can contain sensitive values. Keep this feature off unless those fields, retention, access, privacy obligations, and CloudWatch Logs/Contributor Insights charges have been reviewed.
 
-The always-on alarms and dashboard provide pipeline health visibility at no additional cost. Enable optional monitoring when you need to investigate specific error patterns or identify failing domains and server IPs. See [Configuration](configuration.md) for details on enabling monitoring, and [Athena Queries](athena-queries.md) for historical analysis.
+## Optional WAF logging
+
+Set `enableWafLogging=true` to create a seven-day CloudWatch Logs group named `aws-waf-logs-nel-reporting`. The logging filter drops allowed requests and keeps only requests whose final AWS WAF action is `BLOCK`.
+
+Blocked-only logging lowers volume and supports abuse investigation, but it is still billable and may include URI, header, client IP, and rule-match metadata. It is independent of Lambda monitoring, and both features default to off.
+
+## Subscribe to alerts
+
+Use the `AlarmTopicArn` stack output to add an Amazon SNS subscription. Confirm the subscription before expecting notifications.
+
+## Cost controls
+
+- Keep `success_fraction` low for busy sites; successful NEL reports can dominate ingestion volume.
+- Keep Lambda and WAF logging off until needed.
+- Use the default seven-day WAF log retention and 14-day report lifecycle unless requirements justify longer retention.
+- Bound load tests by request count and duration.
+- Consider AWS Budgets and Cost Anomaly Detection before sustained testing.
+
+See [Configuration](configuration.md) for toggles and [Athena Queries](athena-queries.md) for historical analysis without enabling detailed Lambda logs.

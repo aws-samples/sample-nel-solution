@@ -2,7 +2,7 @@
 
 This cookbook provides Amazon Athena query patterns for analyzing NEL (Network Error Logging) reports stored in the `nel_analytics.nel_reports` table. Queries are organized by use case: time filtering, overview statistics, error breakdown by phase (DNS, TCP, TLS, HTTP), and operational analysis. Each query uses partition projection for efficient scanning.
 
-All queries target `nel_analytics.nel_reports` (Parquet format, partition projection). Always include partition filters (`year`, `month`, `day`) to minimize scan cost ($5/TB scanned).
+All queries target `nel_analytics.nel_reports` (Parquet format, partition projection). Always include partition filters (`year`, `month`, `day`) to minimize scanned-data cost. See [Amazon Athena pricing](https://aws.amazon.com/athena/pricing/) for current, Region-specific pricing.
 
 Replace `${YEAR}`, `${MONTH}`, `${DAY}` with your target date values.
 

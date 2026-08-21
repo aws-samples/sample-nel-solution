@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Destroy the NEL Reporting Pipeline and clean up its resources.
 #
-# By default this removes the AWS CloudFormation stack and the AWS Glue and
-# Amazon Athena catalog objects that survive stack deletion. The Amazon S3
-# reports bucket has a RETAIN removal policy, so it is NOT deleted unless you
-# explicitly pass --delete-bucket and confirm. This prevents accidental,
-# unrecoverable data loss.
+# By default this removes the AWS CloudFormation stack, pre-deletes the Amazon
+# Athena workgroup whose query history can block deletion, and defensively
+# removes any remaining AWS Glue catalog objects. The Amazon S3 reports bucket
+# has a RETAIN removal policy, so it is NOT deleted unless you explicitly pass
+# --delete-bucket and confirm. This prevents accidental, unrecoverable data loss.
 #
 # Usage:
 #   ./scripts/cleanup.sh [--yes] [--delete-bucket] [--region REGION]
@@ -105,8 +105,8 @@ else
   npx cdk destroy "$STACK_NAME"
 fi
 
-# 3. Remove Glue catalog objects. The custom resource has no onDelete handler,
-#    so the database and table survive stack deletion.
+# 3. Defensively remove Glue catalog objects if they remain. CloudFormation
+#    normally deletes the stack-managed database and table during step 2.
 echo ""
 echo "==> Removing the Athena/Glue catalog objects..."
 if aws glue delete-table --database-name nel_analytics --name nel_reports --region "$REGION" 2>/dev/null; then

@@ -12,9 +12,11 @@ for arg in "$@"; do
   esac
 done
 
-# Show monitoring toggle status
-MONITORING=$(node -e "console.log(require('./cdk.json').context.enableMonitoring ?? true)")
+# Show optional logging toggle status. Both default to false in the stack.
+MONITORING=$(node -e "console.log(require('./cdk.json').context.enableMonitoring ?? false)")
+WAF_LOGGING=$(node -e "console.log(require('./cdk.json').context.enableWafLogging ?? false)")
 echo "==> enableMonitoring: ${MONITORING}"
+echo "==> enableWafLogging: ${WAF_LOGGING}"
 echo ""
 
 echo "==> Installing dependencies..."

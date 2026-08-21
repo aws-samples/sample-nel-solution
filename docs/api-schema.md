@@ -90,7 +90,7 @@ The `body` object contains the network error details. Fields vary by error phase
 | `sampling_fraction` | number | 0.0-1.0, the sampling rate that selected this report |
 | `elapsed_time` | integer | Milliseconds from request start to completion or cancellation |
 | `phase` | string | `"dns"`, `"connection"`, or `"application"` |
-| `type` | string | Error type (see section 6) or `"ok"` for success |
+| `type` | string | Predefined or user-agent extension error type (see section 6), or `"ok"` for success |
 
 ### Present when phase != "dns" (step 7)
 
@@ -181,7 +181,10 @@ Our endpoint also accepts a single object (not wrapped in array):
 
 ---
 
-## 6. Predefined Error Types
+## 6. Predefined error types and success outcome
+
+The W3C specification defines 29 predefined network error types and separately defines `ok` as a successful outcome. User agents may extend the error-type list. The pipeline stores extension values unchanged in Parquet, but maps them to the single `other` CloudWatch metric dimension to keep metric cardinality bounded.
+
 
 ### DNS resolution (phase: `dns`)
 
@@ -225,12 +228,17 @@ Our endpoint also accepts a single object (not wrapped in array):
 | `http.response.redirect_loop` | Redirect loop detected |
 | `http.failed` | HTTP connection failed (other reasons) |
 
-### Other
+### Other error types
 
 | Type | Description |
 |------|-------------|
 | `abandoned` | User aborted the request |
 | `unknown` | Unknown error |
+
+### Success outcome
+
+| Type | Description |
+|------|-------------|
 | `ok` | Successful request (sampled via `success_fraction`) |
 
 ---
@@ -290,6 +298,10 @@ Single path: `POST /prod/`
 - `application/reports+json` (W3C standard, mandatory per Reporting API section 2.2)
 - All other content types rejected with 415 (`passthroughBehavior: NEVER`)
 
+### Stage throttling
+
+API Gateway applies a 100 requests/second rate target with a burst target of 200 across the entire `prod` stage. This is separate from the per-IP WAF rule. API Gateway throttling uses a token bucket and can return `429 Too Many Requests`; it is a best-effort target, not an exact request ceiling.
+
 ### Request validation
 
 API Gateway model validates:
@@ -300,7 +312,7 @@ API Gateway model validates:
 
 | Rule | Priority | Check | Label |
 |------|----------|-------|-------|
-| RateLimitPerIP | 10 | 2000 req/min/IP | None (block) |
+| RateLimitPerIP | 10 | 1,000 requests per 300 seconds per source IP | None (block) |
 | AWSIPReputation | 20 | Known bad IPs | None (block) |
 | AWSKnownBadInputs | 30 | Log4j, traversal | None (block) |
 | AWSCoreRuleSet | 40 | OWASP top 10 | None (block) |
@@ -310,6 +322,10 @@ API Gateway model validates:
 | AllowCORSPreflight | 9998 | valid-path + valid-method + OPTIONS | allow |
 | AllowValidRequests | 9999 | All 3 labels present | allow |
 | Default | n/a | Everything else | block |
+
+AWS WAF can inspect up to the first 16 KB of an API Gateway request body by default. However, the deployed AWS Managed Rules Core Rule Set includes `SizeRestrictions_BODY`, which blocks request bodies larger than 8 KB before the positive allow rules run. The effective default request-body ceiling is therefore 8 KB. `ValidateBody` also uses `NO_MATCH` for WAF-oversized bodies, so a body beyond the integration inspection limit cannot receive `nel:valid-body` and remains blocked by the default action. Other managed rules can block smaller payloads that match their protections.
+
+Rate-based enforcement occurs near the configured threshold rather than as an exact hard ceiling. The five-minute WAF setting averages about 3.3 requests/second per IP, while the API Gateway stage can accept up to its higher aggregate target across many source IPs.
 
 ### CORS
 

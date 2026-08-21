@@ -31,8 +31,8 @@ flowchart LR
 |-------|---------|---------|
 | Protection | AWS WAF | Positive security model: rate limit, AWS managed rules, path + method + body validation |
 | Ingestion | API Gateway | Regional REST API, `application/reports+json` only |
-| Buffering | Firehose | 64 MB / 300s buffer, Parquet format conversion (SNAPPY) |
-| Transform | Lambda | Decode, validate, enrich. Publishes CloudWatch metrics |
+| Buffering | Firehose | 64 MB / 300s buffer, JSON-to-Parquet format conversion (SNAPPY) |
+| Transform | Lambda | Expand browser arrays to NDJSON, enrich records, and publish bounded metrics |
 | Storage | S3 | 14-day lifecycle, SSE-S3 encryption, Parquet columnar format |
 | Analytics | Athena | Partition projection (year/month/day), no AWS Glue crawler needed |
 | Alerting | CloudWatch + SNS | API errors, Lambda failures, Firehose issues, data freshness |
@@ -41,7 +41,7 @@ flowchart LR
 
 Before you begin, you need:
 
-- Node.js 18.x or later
+- Node.js 22.x or later
 - AWS CDK CLI (`npm install -g aws-cdk`)
 - AWS CLI configured with credentials (`aws configure`)
 - An AWS account with permissions to create AWS CloudFormation stacks, Lambda functions, S3 buckets, API Gateway APIs, and related resources
@@ -58,18 +58,20 @@ cdk deploy
 The stack deploys to your configured AWS region (`CDK_DEFAULT_REGION` or AWS CLI profile).
 
 Outputs after deploy:
-- `APIEndpoint`: your NEL reporting URL
+- `APIEndpoint`: NEL reporting URL, including the `/prod/` stage path
 - `BucketName`: S3 bucket for reports
-- `AlarmTopicArn`: subscribe for alerts
+- `AthenaResultsBucketName`: S3 bucket for Athena query results
+- `FirehoseStreamName`: Firehose delivery stream
+- `AlarmTopicArn`: SNS topic for alarm notifications
 
-Verify the deployment succeeded by confirming all three outputs are displayed. If the deployment fails, check the AWS CloudFormation console for error details.
+Verify the deployment succeeded by confirming these outputs are displayed. AWS CDK can also display a construct-generated API endpoint output. If the deployment fails, check the AWS CloudFormation console for error details.
 
 Then [configure NEL headers](docs/nel-headers.md) on your web application or Amazon CloudFront distribution.
 
 ## Sending a Test Report
 
 ```bash
-curl -X POST https://YOUR-API-ENDPOINT/prod/ \
+curl -X POST https://YOUR-API-ID.execute-api.YOUR-REGION.amazonaws.com/prod/ \
   -H "Content-Type: application/reports+json" \
   -d '[{"type":"network-error","url":"https://example.com","body":{"type":"dns.name_not_resolved","phase":"dns","elapsed_time":5000,"sampling_fraction":1.0}}]'
 ```
@@ -90,8 +92,9 @@ See [`docs/athena-queries.md`](docs/athena-queries.md) for more query patterns.
 ```
 bin/nel-project.ts           CDK app entry point (cdk-nag enabled)
 lib/nel-project-stack.ts     CDK stack, all infrastructure
-lambda/index.js              Firehose transform: decode, validate, enrich
-test/nel-project.test.ts     Unit tests (node:test, zero dependencies)
+lambda/index.js              Firehose transform: decode, expand arrays, enrich
+test/nel-project.test.ts     CDK assertion tests (built-in node:test runner)
+test/lambda-transform.test.js  Lambda transform tests (built-in node:test runner)
 scripts/                     Deploy, cleanup, test, and load generation scripts
 docs/                        Configuration, NEL headers, queries, monitoring
 ```
@@ -99,8 +102,8 @@ docs/                        Configuration, NEL headers, queries, monitoring
 ## Testing
 
 ```bash
-npm test                                                        # unit tests
-./scripts/test-nel-errors.sh https://YOUR-ENDPOINT/prod/ --all  # 30 NEL error types
+npm test                                                        # CDK assertions + Lambda transform tests
+./scripts/test-nel-errors.sh https://YOUR-ENDPOINT/prod/ --all  # 29 error types + ok (30 outcomes)
 ./scripts/test-athena-queries.sh                                # 17 Athena queries
 ./scripts/generate-nel-data.sh https://YOUR-ENDPOINT/prod/ 5 10 # synthetic load
 ```
@@ -108,11 +111,22 @@ npm test                                                        # unit tests
 ## Security
 
 - AWS WAF positive security model: default BLOCK, label-based allow
-- Rate limiting: 2000 req/min/IP + AWS IP Reputation + Core Rule Set + Known Bad Inputs
+- Rate controls: AWS WAF 1,000 requests per 5 minutes per IP; API Gateway 100 RPS/200 burst across the stage
+- Managed protections: AWS IP Reputation, Core Rule Set, and Known Bad Inputs
 - Content-Type enforcement: only `application/reports+json` accepted
 - S3: BlockPublicAccess, enforceSSL, SSE-S3 encryption
 - AWS Identity and Access Management (IAM): least-privilege, namespace-scoped permissions
 - No authentication by design. Browsers send NEL reports anonymously per the W3C specification
+- Lambda structured logging and blocked-only WAF logging are independent opt-in features and default to off
+- W3C extension error types are stored as received but aggregate into the bounded CloudWatch metric value `other`
+
+## Operational limits and data handling
+
+The API Gateway setting is an aggregate token-bucket target for the stage; the WAF setting is a separate rolling per-IP control. Throttling is best effort and clients can receive `429` from API Gateway or `403` from WAF. AWS WAF can inspect up to 16 KB of an API Gateway request body by default, but the deployed AWS Managed Rules Core Rule Set blocks bodies larger than 8 KB. The effective default request-body ceiling is therefore 8 KB. Bodies beyond the integration inspection limit also cannot receive the positive-validation label. Managed rules can block smaller payloads that resemble attacks; test representative browser batches before broader use.
+
+NEL reports may contain URLs, query strings, referrers, user agents, public server IPs, and timings. Review data classification, privacy/legal requirements, access controls, retention, and current AWS pricing before deployment. The reports bucket expires objects after 14 days. Detailed Lambda and WAF logs remain off unless explicitly enabled in `cdk.json`.
+
+Firehose performs JSON-to-Parquet conversion, but its JSON deserializer does not accept browser report arrays. The transform Lambda expands those arrays into newline-delimited JSON before conversion and adds metadata. See [Architecture decisions](docs/architecture-decisions.md) for the documented trade-offs.
 
 ## Cleanup
 
@@ -128,6 +142,7 @@ The cleanup script resolves the AWS Region from `--region`, `AWS_REGION`, `AWS_D
 
 ## Documentation
 
+- [Architecture Decisions](docs/architecture-decisions.md): CloudFront, metrics, Parquet, Lake Formation, rate, and logging trade-offs
 - [Configuration](docs/configuration.md): feature toggles and options
 - [NEL Headers](docs/nel-headers.md): how to enable NEL on your site
 - [Athena Queries](docs/athena-queries.md): query cookbook

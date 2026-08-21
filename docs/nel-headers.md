@@ -13,21 +13,23 @@ Before configuring NEL headers, you need:
 
 ## Configuration
 
-Add these response headers to your web application (or CloudFront Response Headers Policy):
+Add these response headers to your web application or CloudFront response headers policy. Replace `https://YOUR-API-ID.execute-api.YOUR-REGION.amazonaws.com/prod/` with the complete `APIEndpoint` stack output exactly as displayed:
 
 ```
-Report-To: {"group":"nel","max_age":86400,"endpoints":[{"url":"https://YOUR-API-ENDPOINT/prod/"}]}
+Report-To: {"group":"nel","max_age":86400,"endpoints":[{"url":"https://YOUR-API-ID.execute-api.YOUR-REGION.amazonaws.com/prod/"}]}
 NEL: {"report_to":"nel","max_age":86400,"include_subdomains":true,"success_fraction":0.01,"failure_fraction":1.0}
 ```
 
 ## Amazon CloudFront Response Headers Policy
 
-To enable NEL on an Amazon CloudFront distribution, create a custom response headers policy with the two headers above. Replace `YOUR-API-ENDPOINT` with the `APIEndpoint` output from `cdk deploy`.
+To enable NEL on an Amazon CloudFront distribution, create a custom response headers policy with the two headers above. Copy the complete `APIEndpoint` output from `cdk deploy` into each `Report-To` URL without adding another scheme, hostname, or stage path.
+
+A response headers policy is preferred over CloudFront Functions or Lambda@Edge for these static values. CloudFront adds the configured headers to viewer responses without invoking edge compute. The default quota is 20 custom response headers policies per account and 10 custom headers per policy; this configuration uses one policy and two headers. Each header value must be no longer than 1,783 characters, which the examples below satisfy. See [CloudFront quotas](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/cloudfront-limits.html).
 
 ### AWS Console
 
 1. Open CloudFront > Policies > Response headers > Create response headers policy
-2. Under Custom headers, add the `Report-To` header with value `{"group":"nel","max_age":86400,"endpoints":[{"url":"https://YOUR-API-ENDPOINT/prod/"}]}`
+2. Under Custom headers, add the `Report-To` header with value `{"group":"nel","max_age":86400,"endpoints":[{"url":"https://YOUR-API-ID.execute-api.YOUR-REGION.amazonaws.com/prod/"}]}`
 3. Add the `NEL` header with value `{"report_to":"nel","max_age":86400,"include_subdomains":true,"success_fraction":0.01,"failure_fraction":1.0}`
 4. Set Origin override to No for both (so origin headers take precedence if present)
 5. Save the policy
@@ -44,7 +46,7 @@ aws cloudfront create-response-headers-policy --response-headers-policy-config '
     "Items": [
       {
         "Header": "Report-To",
-        "Value": "{\"group\":\"nel\",\"max_age\":86400,\"endpoints\":[{\"url\":\"https://YOUR-API-ENDPOINT/prod/\"}]}",
+        "Value": "{\"group\":\"nel\",\"max_age\":86400,\"endpoints\":[{\"url\":\"https://YOUR-API-ID.execute-api.YOUR-REGION.amazonaws.com/prod/\"}]}",
         "Override": false
       },
       {
@@ -79,7 +81,7 @@ aws cloudfront update-distribution \
    ```
    Look for the `Report-To` and `NEL` headers in the response.
 
-2. Open your site in Chrome or Firefox
+2. Open your site in a browser that implements NEL, such as a current Chromium-based browser. Browser support is limited and should be verified for your target clients.
 3. Open Developer Tools
 4. Choose the Network tab
 5. Refresh the page

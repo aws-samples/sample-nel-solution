@@ -1,40 +1,55 @@
 /**
  * CDK assertion tests for the NEL Reporting Pipeline stack.
  *
- * These tests synthesize the NelAnalyticsPipeline stack into a CloudFormation
- * template and assert that the resources the pipeline depends on exist with the
- * expected properties. They use node:test and the aws-cdk-lib assertions module,
- * so they run without deploying anything and are safe and fast for CI.
- *
- * The stack is synthesized with enableMonitoring=true so the optional
- * monitoring resources (Contributor Insights rules and log widgets) are
- * exercised alongside the always-on pipeline resources.
+ * These tests synthesize the stack into CloudFormation and verify security,
+ * format-conversion, throttling, and optional-feature behavior without deploying.
  */
 import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
 import * as cdk from 'aws-cdk-lib';
-import { Template } from 'aws-cdk-lib/assertions';
+import { Match, Template } from 'aws-cdk-lib/assertions';
 import { NelAnalyticsPipeline } from '../lib/nel-project-stack';
 
+function synthTemplate(context: Record<string, unknown> = {}): Template {
+  const app = new cdk.App({ context });
+  const stack = new NelAnalyticsPipeline(app, `TestStack${Math.random().toString(36).slice(2)}`);
+  return Template.fromStack(stack);
+}
+
 describe('NelAnalyticsPipeline', () => {
-  // Synthesize the stack once and reuse the template across all assertions.
-  const app = new cdk.App({ context: { enableMonitoring: true } });
-  const stack = new NelAnalyticsPipeline(app, 'TestStack');
-  const template = Template.fromStack(stack);
+  const template = synthTemplate({ enableMonitoring: true });
 
-  // WAF WebACL is the access-control layer for the public ingress endpoint.
-  it('creates WAF WebACL', () => {
+  it('creates WAF WebACL with the per-IP five-minute rate limit', () => {
     template.resourceCountIs('AWS::WAFv2::WebACL', 1);
+    template.hasResourceProperties('AWS::WAFv2::WebACL', {
+      Rules: Match.arrayWith([
+        Match.objectLike({
+          Name: 'RateLimitPerIP',
+          Statement: {
+            RateBasedStatement: {
+              AggregateKeyType: 'IP',
+              EvaluationWindowSec: 300,
+              Limit: 1000,
+            },
+          },
+        }),
+      ]),
+    });
   });
 
-  // Regional REST API that receives the browser NEL POST requests.
-  it('creates API Gateway REST API', () => {
+  it('creates API Gateway with the aggregate stage throttle', () => {
     template.resourceCountIs('AWS::ApiGateway::RestApi', 1);
+    template.hasResourceProperties('AWS::ApiGateway::Stage', {
+      MethodSettings: Match.arrayWith([
+        Match.objectLike({
+          ThrottlingBurstLimit: 200,
+          ThrottlingRateLimit: 100,
+        }),
+      ]),
+    });
   });
 
-  // Firehose must convert records to Parquet (SNAPPY) so Athena can run
-  // efficient columnar queries over the stored reports.
-  it('creates Firehose delivery stream with Parquet format conversion', () => {
+  it('creates Firehose delivery stream with Lambda and Parquet conversion', () => {
     template.hasResourceProperties('AWS::KinesisFirehose::DeliveryStream', {
       ExtendedS3DestinationConfiguration: {
         CompressionFormat: 'UNCOMPRESSED',
@@ -44,18 +59,28 @@ describe('NelAnalyticsPipeline', () => {
             Serializer: { ParquetSerDe: { Compression: 'SNAPPY' } },
           },
         },
+        ProcessingConfiguration: {
+          Enabled: true,
+          Processors: Match.arrayWith([
+            Match.objectLike({ Type: 'Lambda' }),
+          ]),
+        },
       },
     });
   });
 
-  // Transform Lambda runs on the pinned Node.js runtime.
-  it('creates transform Lambda', () => {
+  it('creates the transform Lambda with version metadata configuration', () => {
     template.hasResourceProperties('AWS::Lambda::Function', {
       Runtime: 'nodejs22.x',
+      Environment: {
+        Variables: Match.objectLike({
+          APP_VERSION: '1.0.0',
+          ENABLE_MONITORING: 'true',
+        }),
+      },
     });
   });
 
-  // Reports bucket must encrypt at rest and block all public access.
   it('creates S3 bucket with encryption and public access blocked', () => {
     template.hasResourceProperties('AWS::S3::Bucket', {
       BucketEncryption: {
@@ -69,24 +94,21 @@ describe('NelAnalyticsPipeline', () => {
         IgnorePublicAcls: true,
         RestrictPublicBuckets: true,
       },
+      Tags: Match.arrayWith([
+        { Key: 'CostCenter', Value: 'sample' },
+        { Key: 'Environment', Value: 'dev' },
+        { Key: 'Owner', Value: 'sample-maintainer' },
+        { Key: 'Project', Value: 'nel-reporting-pipeline' },
+        { Key: 'Version', Value: '1.0.0' },
+      ]),
     });
   });
 
-  // SNS topic fans out alarm notifications to subscribers.
-  it('creates SNS topic for alarms', () => {
+  it('creates SNS, Glue, and Athena resources', () => {
     template.resourceCountIs('AWS::SNS::Topic', 1);
-  });
-
-  // Glue database backs the Athena catalog for the reports.
-  it('creates Glue database', () => {
     template.hasResourceProperties('AWS::Glue::Database', {
       DatabaseInput: { Name: 'nel_analytics' },
     });
-  });
-
-  // Glue table defines the Parquet schema and partition projection that let
-  // Athena query by year/month/day without running a crawler.
-  it('creates Glue table with Parquet format and partition projection', () => {
     template.hasResourceProperties('AWS::Glue::Table', {
       DatabaseName: 'nel_analytics',
       TableInput: {
@@ -105,5 +127,59 @@ describe('NelAnalyticsPipeline', () => {
         },
       },
     });
+  });
+
+  it('keeps optional Lambda and WAF logging off by default', () => {
+    const defaultTemplate = synthTemplate();
+    defaultTemplate.resourceCountIs('AWS::CloudWatch::InsightRule', 0);
+    defaultTemplate.resourceCountIs('AWS::WAFv2::LoggingConfiguration', 0);
+    defaultTemplate.hasResourceProperties('AWS::Lambda::Function', {
+      Environment: {
+        Variables: Match.objectLike({ ENABLE_MONITORING: 'false' }),
+      },
+    });
+  });
+
+  it('accepts CLI string booleans and enables blocked-only WAF logging', () => {
+    const enabledTemplate = synthTemplate({
+      enableMonitoring: 'true',
+      enableWafLogging: 'true',
+    });
+    enabledTemplate.resourceCountIs('AWS::CloudWatch::InsightRule', 11);
+    enabledTemplate.hasResourceProperties('AWS::Logs::LogGroup', {
+      LogGroupName: 'aws-waf-logs-nel-reporting',
+      RetentionInDays: 7,
+    });
+    enabledTemplate.hasResourceProperties('AWS::WAFv2::LoggingConfiguration', {
+      LoggingFilter: {
+        DefaultBehavior: 'DROP',
+        Filters: [{
+          Behavior: 'KEEP',
+          Conditions: [{ ActionCondition: { Action: 'BLOCK' } }],
+          Requirement: 'MEETS_ANY',
+        }],
+      },
+    });
+  });
+
+  it('rejects invalid boolean context values', () => {
+    const app = new cdk.App({ context: { enableMonitoring: 'yes' } });
+    assert.throws(
+      () => new NelAnalyticsPipeline(app, 'InvalidFlagStack'),
+      /enableMonitoring must be true or false/,
+    );
+  });
+
+  it('does not synthesize the removed Lake Formation compatibility grant', () => {
+    const rendered = JSON.stringify(template.toJSON());
+    assert.equal(rendered.includes('IAM_ALLOWED_PRINCIPALS'), false);
+    assert.equal(rendered.includes('lakeformation:GrantPermissions'), false);
+    assert.equal(rendered.includes('arn:aws:glue:'), false);
+  });
+
+  it('grants API Gateway only the Firehose action it invokes', () => {
+    const rendered = JSON.stringify(template.toJSON());
+    assert.equal(rendered.includes('firehose:PutRecordBatch'), false);
+    assert.equal(rendered.includes('firehose:PutRecord'), true);
   });
 });

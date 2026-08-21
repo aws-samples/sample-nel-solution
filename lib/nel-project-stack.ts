@@ -10,9 +10,16 @@ import * as sns from 'aws-cdk-lib/aws-sns';
 import * as wafv2 from 'aws-cdk-lib/aws-wafv2';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as glue from 'aws-cdk-lib/aws-glue';
-import * as cr from 'aws-cdk-lib/custom-resources';
 import { Construct } from 'constructs';
 import { NagSuppressions } from 'cdk-nag';
+
+function contextBoolean(scope: Construct, key: string, defaultValue = false): boolean {
+  const value = scope.node.tryGetContext(key);
+  if (value === undefined) return defaultValue;
+  if (value === true || value === 'true') return true;
+  if (value === false || value === 'false') return false;
+  throw new Error(`CDK context ${key} must be true or false, received: ${String(value)}`);
+}
 
 export class NelAnalyticsPipeline extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -22,11 +29,15 @@ export class NelAnalyticsPipeline extends cdk.Stack {
     const project = this.node.tryGetContext('project') ?? 'nel-reporting-pipeline';
     const environment = this.node.tryGetContext('environment') ?? 'dev';
     const version = this.node.tryGetContext('version') ?? '1.0.0';
+    const owner = this.node.tryGetContext('owner') ?? 'sample-maintainer';
+    const costCenter = this.node.tryGetContext('costCenter') ?? 'sample';
 
-    // ── Tags (centralized, inherited by all resources) ───────────────
+    // ── Tags (centralized, inherited by all taggable resources) ───────
     cdk.Tags.of(this).add('Project', project);
     cdk.Tags.of(this).add('Environment', environment);
     cdk.Tags.of(this).add('Version', version);
+    cdk.Tags.of(this).add('Owner', owner);
+    cdk.Tags.of(this).add('CostCenter', costCenter);
 
     // ── SNS Topic for alarm notifications ────────────────────────────
     const alarmTopic = new sns.Topic(this, 'AlarmTopic', {
@@ -65,8 +76,8 @@ export class NelAnalyticsPipeline extends cdk.Stack {
     });
 
     // ── Lambda Function ────────────────────────────────────────────────
-    const enableMonitoring = this.node.tryGetContext('enableMonitoring') === true;
-    const lakeFormationEnabled = this.node.tryGetContext('lakeFormationEnabled') === true;
+    const enableMonitoring = contextBoolean(this, 'enableMonitoring');
+    const enableWafLogging = contextBoolean(this, 'enableWafLogging');
 
     // Custom role: always-on metrics, conditional CW Logs
     const lambdaRole = new iam.Role(this, 'TransformLambdaRole', {
@@ -94,6 +105,7 @@ export class NelAnalyticsPipeline extends cdk.Stack {
       role: lambdaRole,
       environment: {
         ENABLE_MONITORING: String(enableMonitoring),
+        APP_VERSION: version,
       },
       description: 'Transforms NEL reports for Firehose delivery to S3',
     });
@@ -108,9 +120,9 @@ export class NelAnalyticsPipeline extends cdk.Stack {
     firehoseRole.addToPolicy(new iam.PolicyStatement({
       actions: ['glue:GetTable', 'glue:GetTableVersion', 'glue:GetTableVersions'],
       resources: [
-        `arn:aws:glue:${this.region}:${this.account}:catalog`,
-        `arn:aws:glue:${this.region}:${this.account}:database/nel_analytics`,
-        `arn:aws:glue:${this.region}:${this.account}:table/nel_analytics/nel_reports`,
+        this.formatArn({ service: 'glue', resource: 'catalog' }),
+        this.formatArn({ service: 'glue', resource: 'database', resourceName: 'nel_analytics' }),
+        this.formatArn({ service: 'glue', resource: 'table', resourceName: 'nel_analytics/nel_reports' }),
       ],
     }));
 
@@ -154,7 +166,10 @@ export class NelAnalyticsPipeline extends cdk.Stack {
         },
       },
     });
-    deliveryStream.node.addDependency(firehoseRole);
+    // The ARN reference already orders the role itself. Wait only for the
+    // separately synthesized inline policy that grants Firehose access.
+    const firehoseDefaultPolicy = firehoseRole.node.tryFindChild('DefaultPolicy');
+    if (firehoseDefaultPolicy) deliveryStream.node.addDependency(firehoseDefaultPolicy);
 
     // ── API Gateway (regional, public) ──────────────────────────────
     const apiGatewayRole = new iam.Role(this, 'APIGatewayFirehoseRole', {
@@ -162,7 +177,7 @@ export class NelAnalyticsPipeline extends cdk.Stack {
     });
     apiGatewayRole.addToPolicy(
       new iam.PolicyStatement({
-        actions: ['firehose:PutRecord', 'firehose:PutRecordBatch'],
+        actions: ['firehose:PutRecord'],
         resources: [deliveryStream.attrArn],
       }),
     );
@@ -307,11 +322,11 @@ export class NelAnalyticsPipeline extends cdk.Stack {
       scope: 'REGIONAL',
       visibilityConfig: vis('NELWebACL'),
       rules: [
-        // P10: Rate limit 2000 req/min per IP
+        // P10: Rate limit 1000 requests per 5 minutes per source IP.
         {
           name: 'RateLimitPerIP', priority: 10,
           action: { block: {} }, visibilityConfig: vis('RateLimitPerIP'),
-          statement: { rateBasedStatement: { limit: 2000, evaluationWindowSec: 60, aggregateKeyType: 'IP' } },
+          statement: { rateBasedStatement: { limit: 1000, evaluationWindowSec: 300, aggregateKeyType: 'IP' } },
         },
         // P20: IP Reputation -- block known DDoS sources and botnets
         {
@@ -410,6 +425,28 @@ export class NelAnalyticsPipeline extends cdk.Stack {
         },
       ],
     });
+
+    // Optional blocked-request logging. Disabled by default to avoid log ingestion
+    // costs and collecting request metadata unless the deployer explicitly opts in.
+    if (enableWafLogging) {
+      const wafLogGroup = new logs.LogGroup(this, 'WAFLogGroup', {
+        logGroupName: 'aws-waf-logs-nel-reporting',
+        retention: logs.RetentionDays.ONE_WEEK,
+        removalPolicy: cdk.RemovalPolicy.DESTROY,
+      });
+      new wafv2.CfnLoggingConfiguration(this, 'WAFLogging', {
+        resourceArn: webAcl.attrArn,
+        logDestinationConfigs: [wafLogGroup.logGroupArn],
+        loggingFilter: {
+          DefaultBehavior: 'DROP',
+          Filters: [{
+            Behavior: 'KEEP',
+            Requirement: 'MEETS_ANY',
+            Conditions: [{ ActionCondition: { Action: 'BLOCK' } }],
+          }],
+        },
+      });
+    }
 
     // ── WAF Association with API Gateway ────────────────────────────
     new wafv2.CfnWebACLAssociation(this, 'WAFAssociation', {
@@ -550,7 +587,7 @@ export class NelAnalyticsPipeline extends cdk.Stack {
     if (enableMonitoring) {
 
     // ── Contributor Insights Rules ──────────────────────────────────
-    // Fixed cost: $0.10/rule/month + $0.02/M events. No per-query charge.
+    // Review current CloudWatch Contributor Insights pricing before enabling these rules.
     const lambdaLogGroup = transformLambda.logGroup;
     const nelLogs = [lambdaLogGroup.logGroupName];
     const nelEvent = [{ Match: '$.event', In: ['nel_report'] }];
@@ -744,8 +781,8 @@ export class NelAnalyticsPipeline extends cdk.Stack {
         },
       },
     });
-    glueTable.addDependency(glueDatabase);
-    deliveryStream.addDependency(glueTable);
+    glueTable.addResourceDependency(glueDatabase);
+    deliveryStream.addResourceDependency(glueTable);
 
     // ── Athena workgroup (for querying) ─────────────────────────────
     const athenaResultsLocation = `s3://${athenaResultsBucket.bucketName}/`;
@@ -764,57 +801,6 @@ export class NelAnalyticsPipeline extends cdk.Stack {
         },
       },
     });
-
-    // ── Lake Formation opt-out (for accounts with Security Lake / Lake Formation) ──
-    // Uses AwsSdkCall custom resource to grant IAM_ALLOWED_PRINCIPALS, avoiding the
-    // requirement for CloudFormation's execution role to be a Lake Formation admin.
-    if (lakeFormationEnabled) {
-      const lfGrant = new cr.AwsCustomResource(this, 'LFGrantIAMAccess', {
-        onCreate: {
-          service: 'LakeFormation',
-          action: 'batchGrantPermissions',
-          parameters: {
-            Entries: [
-              {
-                Id: 'db-grant',
-                Principal: { DataLakePrincipalIdentifier: 'IAM_ALLOWED_PRINCIPALS' },
-                Resource: { Database: { Name: 'nel_analytics' } },
-                Permissions: ['ALL'],
-              },
-              {
-                Id: 'table-grant',
-                Principal: { DataLakePrincipalIdentifier: 'IAM_ALLOWED_PRINCIPALS' },
-                Resource: { Table: { DatabaseName: 'nel_analytics', Name: 'nel_reports' } },
-                Permissions: ['ALL'],
-              },
-            ],
-          },
-          physicalResourceId: cr.PhysicalResourceId.of('nel-lf-iam-grant'),
-        },
-        policy: cr.AwsCustomResourcePolicy.fromStatements([
-          // Lake Formation BatchGrantPermissions/GrantPermissions are account-level APIs
-          // that do not support resource-level ARN scoping. Resource:* is required per AWS docs:
-          // https://docs.aws.amazon.com/lake-formation/latest/dg/
-          new iam.PolicyStatement({
-            actions: ['lakeformation:BatchGrantPermissions', 'lakeformation:GrantPermissions'],
-            resources: ['*'],
-          }),
-          new iam.PolicyStatement({
-            actions: ['glue:GetDatabase', 'glue:GetTable'],
-            resources: [
-              `arn:aws:glue:${this.region}:${this.account}:catalog`,
-              `arn:aws:glue:${this.region}:${this.account}:database/nel_analytics`,
-              `arn:aws:glue:${this.region}:${this.account}:table/nel_analytics/nel_reports`,
-            ],
-          }),
-        ]),
-      });
-      lfGrant.node.addDependency(glueTable);
-      deliveryStream.addDependency(lfGrant.node.defaultChild as cdk.CfnResource);
-      NagSuppressions.addResourceSuppressions(lfGrant, [
-        { id: 'AwsSolutions-IAM5', reason: 'Lake Formation BatchGrantPermissions requires Resource:* per AWS docs. Glue actions scoped to nel_analytics database/table.' },
-      ], true);
-    }
 
     // ── Outputs ──────────────────────────────────────────────────────
     new cdk.CfnOutput(this, 'APIEndpoint', {
@@ -883,7 +869,7 @@ export class NelAnalyticsPipeline extends cdk.Stack {
     ]);
     NagSuppressions.addResourceSuppressions(api.deploymentStage, [
       { id: 'AwsSolutions-APIG6', reason: 'Execution logging disabled to reduce cost and avoid account-level CloudWatch Logs role dependency.' },
-      { id: 'AwsSolutions-APIG1', reason: 'Access logging is gated by enableMonitoring context flag. Default off to minimize cost for sample project.' },
+      { id: 'AwsSolutions-APIG1', reason: 'API Gateway access logging is disabled by default to minimize sample cost and avoid collecting request metadata.' },
     ]);
 
     // CDK creates a LogRetention custom resource Lambda when logGroup is referenced in dashboard

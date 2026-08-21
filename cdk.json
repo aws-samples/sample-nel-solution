@@ -87,9 +87,11 @@
     "@aws-cdk/aws-s3:setUniqueReplicationRoleName": true,
     "@aws-cdk/aws-events:requireEventBusPolicySid": true,
     "enableMonitoring": false,
-    "lakeFormationEnabled": false,
+    "enableWafLogging": false,
     "project": "nel-reporting-pipeline",
     "environment": "dev",
-    "version": "1.0.0"
+    "version": "1.0.0",
+    "owner": "sample-maintainer",
+    "costCenter": "sample"
   }
 }

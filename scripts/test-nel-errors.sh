@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 ################################################################################
 # NEL Error Type Test Script
 #
@@ -10,7 +10,7 @@
 #
 # Options:
 #   --all           Send one report per error type (default)
-#   --random N      Send N random reports (1-100)
+#   --random [N]    Send N random reports (default: 10; range: 1-100)
 #   --type TYPE     Send a single specific error type
 #   --list          List all error types and exit
 #   --verbose       Show full curl response
@@ -160,8 +160,8 @@ list_types() {
 }
 
 usage() {
-  sed -n '/^# Usage:/,/^####/p' "$0" | head -n -1 | sed 's/^# //' | sed 's/^#//'
-  exit 0
+  sed -n '/^# Usage:/,/^####/p' "$0" | sed '$d; s/^# //; s/^#//'
+  exit "${1:-0}"
 }
 
 # -- Parse args ----------------------------------------------------------------
@@ -174,24 +174,32 @@ VERBOSE="false"
 shift || true
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --all)     MODE="all"; shift ;;
-    --random)  MODE="random"; RANDOM_COUNT="${2:-10}"; shift 2 ;;
-    --type)    MODE="single"; SINGLE_TYPE="$2"; shift 2 ;;
-    --list)    list_types; exit 0 ;;
+    --all) MODE="all"; shift ;;
+    --random)
+      MODE="random"; RANDOM_COUNT=10; shift
+      if [[ $# -gt 0 && "$1" != --* ]]; then RANDOM_COUNT="$1"; shift; fi
+      ;;
+    --type)
+      if [[ $# -lt 2 || "$2" == --* ]]; then
+        echo -e "${RED}Error: --type requires an error type${NC}"; usage 1
+      fi
+      MODE="single"; SINGLE_TYPE="$2"; shift 2
+      ;;
+    --list) list_types; exit 0 ;;
     --verbose) VERBOSE="true"; shift ;;
-    --help|-h) usage ;;
-    *)         echo "Unknown option: $1"; usage ;;
+    --help|-h) usage 0 ;;
+    *) echo "Unknown option: $1"; usage 1 ;;
   esac
 done
 
 if [[ -z "$API_ENDPOINT" ]]; then
   echo -e "${RED}Error: API endpoint required${NC}"
-  usage
+  usage 1
 fi
 
 # Validate --random range
 if [[ "$MODE" == "random" ]]; then
-  if (( RANDOM_COUNT < 1 || RANDOM_COUNT > 100 )); then
+  if [[ ! "$RANDOM_COUNT" =~ ^[0-9]+$ ]] || (( RANDOM_COUNT < 1 || RANDOM_COUNT > 100 )); then
     echo -e "${RED}Error: --random must be between 1 and 100${NC}"; exit 1
   fi
 fi

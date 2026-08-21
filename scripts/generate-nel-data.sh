@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 ################################################################################
 # NEL Data Generator
@@ -18,18 +18,26 @@
 #   ./scripts/generate-nel-data.sh https://abc123.execute-api.us-east-1.amazonaws.com/prod/ 3 20
 ################################################################################
 
-set -e
+set -euo pipefail
 
 # Configuration
-API_ENDPOINT="${1}"
+API_ENDPOINT="${1:-}"
 INTERVAL_SECONDS="${2:-5}"
 BATCH_SIZE="${3:-10}"
 
 # Validate API endpoint
-if [ -z "$API_ENDPOINT" ]; then
+if [[ -z "$API_ENDPOINT" ]]; then
     echo "Error: API endpoint is required"
     echo "Usage: $0 <API_ENDPOINT> [INTERVAL_SECONDS] [BATCH_SIZE]"
     echo "Example: $0 https://abc123.execute-api.us-east-1.amazonaws.com/prod/ 5 10"
+    exit 1
+fi
+if [[ ! "$INTERVAL_SECONDS" =~ ^[1-9][0-9]*$ ]]; then
+    echo "Error: INTERVAL_SECONDS must be a positive integer" >&2
+    exit 1
+fi
+if [[ ! "$BATCH_SIZE" =~ ^[1-9][0-9]*$ ]]; then
+    echo "Error: BATCH_SIZE must be a positive integer" >&2
     exit 1
 fi
 
@@ -125,12 +133,13 @@ random_range() {
 
 # Function to generate a random NEL report
 generate_nel_report() {
-    local error_type=$(random_element "${ERROR_TYPES[@]}")
-    local method=$(random_element "${HTTP_METHODS[@]}")
-    local domain=$(random_element "${DOMAINS[@]}")
-    local path=$(random_element "${PATHS[@]}")
-    local phase=$(random_element "${PHASES[@]}")
-    local age=$(random_range 1 60)
+    local error_type method domain path phase age
+    error_type=$(random_element "${ERROR_TYPES[@]}")
+    method=$(random_element "${HTTP_METHODS[@]}")
+    domain=$(random_element "${DOMAINS[@]}")
+    path=$(random_element "${PATHS[@]}")
+    phase=$(random_element "${PHASES[@]}")
+    age=$(random_range 1 60)
     
     # Determine status code based on error type
     local status_code
@@ -164,7 +173,8 @@ generate_nel_report() {
     esac
     
     # Build JSON payload
-    local json_payload=$(cat <<EOF
+    local json_payload
+    json_payload=$(cat <<EOF
 {
   "age": $age,
   "type": "network-error",
@@ -211,21 +221,37 @@ display_stats() {
     local success=$2
     local failed=$3
     local elapsed=$4
-    
+    local success_rate="0.00"
+    local reports_per_second="0.00"
+
+    if (( total > 0 )); then
+        success_rate=$(awk -v success="$success" -v total="$total" 'BEGIN {printf "%.2f", (success/total)*100}')
+    fi
+    if (( elapsed > 0 )); then
+        reports_per_second=$(awk -v total="$total" -v elapsed="$elapsed" 'BEGIN {printf "%.2f", total/elapsed}')
+    fi
+
     echo -e "\n${BLUE}═══════════════════════════════════════════════════════════${NC}"
     echo -e "${BLUE}                    Statistics Summary${NC}"
     echo -e "${BLUE}═══════════════════════════════════════════════════════════${NC}"
     echo -e "Total Reports Sent:     ${YELLOW}$total${NC}"
     echo -e "Successful:             ${GREEN}$success${NC}"
     echo -e "Failed:                 ${RED}$failed${NC}"
-    echo -e "Success Rate:           ${YELLOW}$(awk "BEGIN {printf \"%.2f\", ($success/$total)*100}")%${NC}"
+    echo -e "Success Rate:           ${YELLOW}${success_rate}%${NC}"
     echo -e "Running Time:           ${YELLOW}${elapsed}s${NC}"
-    echo -e "Reports per Second:     ${YELLOW}$(awk "BEGIN {printf \"%.2f\", $total/$elapsed}")${NC}"
+    echo -e "Reports per Second:     ${YELLOW}${reports_per_second}${NC}"
     echo -e "${BLUE}═══════════════════════════════════════════════════════════${NC}\n"
 }
 
-# Trap Ctrl+C to display final statistics
-trap 'echo -e "\n${YELLOW}Stopping data generation...${NC}"; display_stats $total_sent $successful_sends $failed_sends $SECONDS; exit 0' INT TERM
+# Initialize counters before installing the signal handler.
+total_sent=0
+successful_sends=0
+failed_sends=0
+batch_number=0
+start_time=$SECONDS
+
+# Trap Ctrl+C to display final statistics.
+trap 'echo -e "\n${YELLOW}Stopping data generation...${NC}"; display_stats "$total_sent" "$successful_sends" "$failed_sends" "$((SECONDS - start_time))"; exit 0' INT TERM
 
 # Main execution
 echo -e "${GREEN}╔═══════════════════════════════════════════════════════════╗${NC}"
@@ -237,15 +263,6 @@ echo -e "  Interval:        ${YELLOW}${INTERVAL_SECONDS}s${NC}"
 echo -e "  Batch Size:      ${YELLOW}${BATCH_SIZE} reports${NC}"
 echo -e "\n${YELLOW}Press Ctrl+C to stop and view statistics${NC}\n"
 
-# Initialize counters
-total_sent=0
-successful_sends=0
-failed_sends=0
-batch_number=0
-
-# Start time
-start_time=$SECONDS
-
 # Main loop
 while true; do
     batch_number=$((batch_number + 1))
@@ -254,7 +271,7 @@ while true; do
     
     echo -e "${BLUE}[Batch #$batch_number]${NC} Generating and sending $BATCH_SIZE reports..."
     
-    for i in $(seq 1 $BATCH_SIZE); do
+    for i in $(seq 1 "$BATCH_SIZE"); do
         # Generate random NEL report
         nel_report=$(generate_nel_report)
         
@@ -286,5 +303,5 @@ while true; do
     
     # Wait before next batch
     echo -e "${YELLOW}Waiting ${INTERVAL_SECONDS}s before next batch...${NC}\n"
-    sleep $INTERVAL_SECONDS
+    sleep "$INTERVAL_SECONDS"
 done

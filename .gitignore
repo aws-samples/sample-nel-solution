@@ -1,5 +1,6 @@
 *.js
 !lambda/**/*.js
+!test/lambda-transform.test.js
 *.d.ts
 node_modules
 
@@ -19,7 +20,11 @@ cdk.out
 .env
 .env.*
 
-# Security scan results (generated, not committed)
+# Security scan and internal review results (generated, not committed)
+/.security-scans/
+/review/
+/cdk.out*
+/cve-lite-scan-*.json
 
 # Internal working files (not for publication)
 .kiro/

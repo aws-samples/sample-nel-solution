@@ -1,11 +1,32 @@
 #!/usr/bin/env bash
 # Test all Athena queries from docs/athena-queries.md
-# Usage: ./scripts/test-athena-queries.sh
+# Usage: ./scripts/test-athena-queries.sh [--region REGION]
 set -euo pipefail
 
 DB="nel_analytics"
 WORKGROUP="nel-analytics"
-REGION="${AWS_DEFAULT_REGION:-eu-north-1}"
+REGION=""
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --region)
+      if [ $# -ge 2 ]; then REGION="$2"; shift; else echo "ERROR: --region needs a value" >&2; exit 2; fi
+      ;;
+    --region=*) REGION="${1#*=}" ;;
+    -h|--help) grep '^#' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "ERROR: unknown argument: $1" >&2; exit 2 ;;
+  esac
+  shift
+done
+
+if [ -z "$REGION" ]; then
+  REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-$(aws configure get region 2>/dev/null || true)}}"
+fi
+if [ -z "$REGION" ]; then
+  echo "ERROR: no AWS Region resolved. Pass --region REGION or configure the AWS CLI." >&2
+  exit 1
+fi
+
 YEAR=$(date -u +%Y)
 MONTH=$(date -u +%m)
 DAY=$(date -u +%d)
@@ -15,6 +36,7 @@ PASS=0; FAIL=0; TOTAL=0
 
 run_query() {
   local name="$1" sql="$2"
+  local qid state reason
   TOTAL=$((TOTAL + 1))
   # Start query
   qid=$(aws athena start-query-execution \
@@ -25,7 +47,7 @@ run_query() {
     --output text --query 'QueryExecutionId' 2>&1) || { echo -e "  ${RED}FAIL${NC}  ${name} (submit error)"; FAIL=$((FAIL+1)); return; }
 
   # Poll for completion (max 30s)
-  for i in $(seq 1 30); do
+  for _ in {1..30}; do
     state=$(aws athena get-query-execution --query-execution-id "$qid" \
       --region "${REGION}" \
       --output text --query 'QueryExecution.Status.State' 2>/dev/null)
@@ -39,7 +61,8 @@ run_query() {
     esac
     sleep 1
   done
-  echo -e "  ${RED}FAIL${NC}  ${name} (timeout)"; FAIL=$((FAIL+1))
+  aws athena stop-query-execution --query-execution-id "$qid" --region "${REGION}" >/dev/null 2>&1 || true
+  echo -e "  ${RED}FAIL${NC}  ${name} (timeout; query cancelled)"; FAIL=$((FAIL+1))
 }
 
 echo -e "\n${BLUE}NEL Athena Query Tester${NC}"
